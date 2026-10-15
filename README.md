@@ -2,7 +2,7 @@
 
 Open-source agent skills for Claude Code, Codex and OpenClaw. Every skill ships with receipts.
 
-**Get each drop by email:** [subscribe](). One email per release: what the skill does, its eval numbers, and what broke on the way.
+**Follow new drops:** Watch → Custom → Releases on this repo. Each release says what the skill does, its numbers, and what broke on the way.
 
 [Русская версия](README.ru.md)
 
@@ -11,7 +11,7 @@ Open-source agent skills for Claude Code, Codex and OpenClaw. Every skill ships 
 <!-- skills:start -->
 | Skill | What it does | Receipts | Runs / sends / fetches |
 | --- | --- | --- | --- |
-| [compact-receipts](skills/compact-receipts/SKILL.md) | Shows what a context compaction dropped: servers, deployments and ports, edited files, open todos, your earlier instructions. | gate pending | runs a local Python script · sends nothing · fetches nothing |
+| [compact-receipts](skills/compact-receipts/SKILL.md) | Shows what a context compaction dropped: servers, deployments and ports, edited files, open todos, your earlier instructions. | [gate report](releases/compact-receipts/gate-report.json) | runs a local Python script · sends nothing · fetches nothing |
 <!-- skills:end -->
 
 Each row links to the skill folder, its eval cases, the raw run logs and the gate report.

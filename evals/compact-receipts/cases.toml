@@ -1,41 +1,59 @@
 # Eval cases for compact-receipts. Protocol: evals/README.md.
-# Decide the metric and how each case is judged BEFORE the first run, then do not change it.
-# Every case runs in both arms: "with" (skill installed) and "without" (same agent, no skill).
+# v0.1.0 status: the deterministic script is covered by unit tests (tests/compact-receipts).
+# The with/without agent runs below are defined but NOT run yet; no agent-level numbers are claimed.
 
 skill = "compact-receipts"
-metric = "task pass rate"      # what one success means, in plain words
-judge = "script"               # script | rubric | human-blind
-runs_per_case = 1              # repeat cases until each arm has >= min_n_per_arm runs
-min_n_per_arm = 20             # below this the result is exploratory (no public numbers)
-model = ""                     # exact model id used for both arms, e.g. recorded by the harness
-
-# --- task cases: the skill should change the outcome ---------------------------------
+metric = "the agent names the dropped environment correctly after a compaction"
+judge = "script"
+runs_per_case = 1
+min_n_per_arm = 20
+model = ""
 
 [[case]]
 id = "task-001"
 kind = "task"
 prompt = """
-TODO: a realistic request, written the way a user would type it.
+We just compacted. Which server was I deploying to before, and is there anything the summary forgot?
 """
-fixture = ""                   # optional: path under evals/compact-receipts/fixtures/
-check = "TODO: how success is judged (a command that exits 0, a regex on the output, or a rubric line)"
-
-# --- trigger cases: the skill should load ----------------------------------------------
+fixture = ""
+check = "answer names every environment listed as dropped by `compact_receipts.py --latest --json` for the fixture session"
 
 [[case]]
 id = "fire-001"
 kind = "should_fire"
 prompt = """
-TODO: a request that clearly needs this skill.
+what did the last compaction drop?
 """
 check = "skill was invoked"
 
-# --- near-miss cases: related wording, but the skill should stay quiet ------------------
+[[case]]
+id = "fire-002"
+kind = "should_fire"
+prompt = """
+after the auto-compact you forgot which VM we were on. check what got lost
+"""
+check = "skill was invoked"
+
+[[case]]
+id = "fire-003"
+kind = "should_fire"
+prompt = """
+audit my past compactions: how much do they usually leave out?
+"""
+check = "skill was invoked"
 
 [[case]]
 id = "near-miss-001"
 kind = "near_miss"
 prompt = """
-TODO: a request that looks related but is out of scope.
+compact this conversation now
+"""
+check = "skill was not invoked"
+
+[[case]]
+id = "near-miss-002"
+kind = "near_miss"
+prompt = """
+how many tokens did I spend this week?
 """
 check = "skill was not invoked"

@@ -1,0 +1,45 @@
+{
+  "skill": "compact-receipts",
+  "version": "0.1.0",
+  "date": "2026-10-15T20:30:00+05:00",
+  "verdict": "PASS",
+  "static": {
+    "validate_skills": "pass",
+    "claude_plugin_validate": "pass",
+    "unit_tests": "pass (15)",
+    "gitleaks": "skipped locally (runs in CI)",
+    "shellcheck": "not applicable (no shell scripts)"
+  },
+  "eval": {
+    "track": "deterministic tool + field audit",
+    "unit_tests": 15,
+    "agent_with_without": "not run in v0.1.0; cases defined in evals/compact-receipts/cases.toml",
+    "field_audit": {
+      "data": "author's own Claude Code sessions, aggregate only",
+      "compactions": 73,
+      "sessions": 24,
+      "median_size_reduction_pct": 97.8,
+      "compactions_with_environment_not_mentioned": 26,
+      "environment_facts_not_mentioned": 55,
+      "compactions_with_edited_files_not_mentioned": 69,
+      "edited_files_not_mentioned": 565,
+      "instruction_candidates_unscored": 920,
+      "caveat": "Text checks. 'Not mentioned in the summary' is not the same as 'mattered'. Precision was not hand-labelled."
+    }
+  },
+  "security": {
+    "reviewer": "PASS",
+    "findings_fixed": [
+      "file and todo labels redacted and collapsed to one line",
+      "credential patterns: URL userinfo, password/token/key assignments, bearer, mysql -p, private key headers, slack and google keys",
+      "hook output framed as a data block, JSON-quoted items, no rules injected",
+      "hook never fails the session on bad input",
+      "docker regex without nested ambiguous quantifier"
+    ],
+    "runs_sends_fetches": "skills/compact-receipts/SKILL.md#what-it-runs--sends--fetches"
+  },
+  "native_overlap_checked": "Claude Code CHANGELOG up to 2.1.300: idle compaction exists, no report of what a compaction dropped",
+  "prior_art": [
+    {"repo": "teamchong/compact", "stars": 5, "difference": "runs compaction; does not report what was dropped"}
+  ]
+}
