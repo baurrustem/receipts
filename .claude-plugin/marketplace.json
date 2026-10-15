@@ -1,0 +1,25 @@
+{
+  "name": "receipts",
+  "owner": {
+    "name": "Baur Rustem",
+    "url": "https://github.com/baurrustem"
+  },
+  "metadata": {
+    "description": "Receipts: open-source agent skills by Baur Rustem, each shipped with with/without evals and raw logs."
+  },
+  "plugins": [
+    {
+      "name": "receipts",
+      "source": "./",
+      "description": "Every skill in the Receipts collection. Each one ships with with/without evals and raw logs.",
+      "category": "productivity",
+      "tags": [
+        "agent-skills",
+        "evals"
+      ],
+      "skills": [
+        "./skills/compact-receipts"
+      ]
+    }
+  ]
+}

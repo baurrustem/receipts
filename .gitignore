@@ -1,0 +1,25 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# Secrets never belong in this repo
+.env
+.env.*
+*.pem
+*.key
+
+# Scratch output (raw eval logs under evals/<skill>/runs/ ARE committed)
+*.tmp
+tmp/
+dist/

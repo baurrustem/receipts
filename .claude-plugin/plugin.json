@@ -1,0 +1,13 @@
+{
+  "name": "receipts",
+  "version": "0.1.0",
+  "description": "Open-source agent skills by Baur Rustem. Each skill ships with receipts: evals with and without the skill, n, and raw logs.",
+  "author": {
+    "name": "Baur Rustem",
+    "url": "https://github.com/baurrustem"
+  },
+  "homepage": "https://github.com/baurrustem/receipts",
+  "repository": "https://github.com/baurrustem/receipts",
+  "license": "MIT",
+  "keywords": ["agent-skills", "skills", "evals", "claude-code", "codex", "openclaw"]
+}

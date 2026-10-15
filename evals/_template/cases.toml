@@ -1,0 +1,41 @@
+# Eval cases for skill-name. Protocol: evals/README.md.
+# Decide the metric and how each case is judged BEFORE the first run, then do not change it.
+# Every case runs in both arms: "with" (skill installed) and "without" (same agent, no skill).
+
+skill = "skill-name"
+metric = "task pass rate"      # what one success means, in plain words
+judge = "script"               # script | rubric | human-blind
+runs_per_case = 1              # repeat cases until each arm has >= min_n_per_arm runs
+min_n_per_arm = 20             # below this the result is exploratory (no public numbers)
+model = ""                     # exact model id used for both arms, e.g. recorded by the harness
+
+# --- task cases: the skill should change the outcome ---------------------------------
+
+[[case]]
+id = "task-001"
+kind = "task"
+prompt = """
+TODO: a realistic request, written the way a user would type it.
+"""
+fixture = ""                   # optional: path under evals/skill-name/fixtures/
+check = "TODO: how success is judged (a command that exits 0, a regex on the output, or a rubric line)"
+
+# --- trigger cases: the skill should load ----------------------------------------------
+
+[[case]]
+id = "fire-001"
+kind = "should_fire"
+prompt = """
+TODO: a request that clearly needs this skill.
+"""
+check = "skill was invoked"
+
+# --- near-miss cases: related wording, but the skill should stay quiet ------------------
+
+[[case]]
+id = "near-miss-001"
+kind = "near_miss"
+prompt = """
+TODO: a request that looks related but is out of scope.
+"""
+check = "skill was not invoked"
