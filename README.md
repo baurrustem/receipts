@@ -16,6 +16,37 @@ Open-source agent skills for Claude Code, Codex and OpenClaw. Every skill ships 
 
 Each row links to the skill folder, its eval cases, the raw run logs and the gate report.
 
+### compact-receipts
+
+**Receipts #01.** Claude Code compacts long sessions, and since 2.1.299 also idle ones. The summary keeps the big picture and quietly leaves out details: the server or VM the agent was on, files it already changed, open todos, things you said at the start. `compact-receipts` prints a receipt of what each compaction left out.
+
+```
+Compaction #3 · 2026-10-15 14:02 · auto · 412,800 → 15,960 tokens (−96.1%)
+Kept 31/40 facts · dropped 9 (6 new)
+  dropped env  vm-b.internal (ssh), widget-staging.up.railway.app, localhost:3300
+  dropped file src/vm/pool.ts ×4, scripts/provision.sh
+  check   rule "never restart vm-a without asking"
+  red at compaction: npm test (summary does NOT mention any failure)
+```
+<sub>Synthetic example.</sub>
+
+**Measured on the author's own sessions** (73 compactions in 24 sessions, median size reduction 97.8%): in 26 compactions the summary did not mention at least one environment the agent had been working with (55 in total); in 69 it did not mention files the agent had edited (565 in total). These are text checks: "not mentioned" is not the same as "mattered".
+
+```bash
+npx skills add baurrustem/receipts --skill compact-receipts
+```
+Then ask your agent "what did the last compaction drop?". Without an agent, from a clone of this repo:
+```bash
+python3 skills/compact-receipts/scripts/compact_receipts.py --latest            # last compacted session
+python3 skills/compact-receipts/scripts/compact_receipts.py --all --since 30d   # audit
+```
+
+Optional: a SessionStart hook with matcher `compact` running `compact_receipts.py --hook` puts the dropped environments, files and todos back into context right after each compaction. Instructions are not injected automatically; the skill asks the agent to check them by meaning first.
+
+**Limits (v0.1):** Claude Code transcripts only (Codex next). Environment detection covers ssh-family targets, IPs, localhost ports, docker containers, common VM CLIs and deploy hosts (railway, fly, vercel, render and similar); third-party APIs are ignored on purpose. Instruction matching is word-based and only nominates candidates.
+
+**Runs / sends / fetches:** runs a local Python 3.9+ script (stdlib only) that reads `~/.claude/projects`; sends nothing; fetches nothing.
+
 ## Every skill ships with receipts
 
 A skill earns a place here by beating the same agent without it. For every release:
