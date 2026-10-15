@@ -516,6 +516,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--reveal", action="store_true", help="show full IP addresses")
     ap.add_argument("--hook", action="store_true", help="SessionStart hook mode (reads hook JSON on stdin)")
     ap.add_argument("--projects", type=Path, default=Path.home() / ".claude" / "projects")
+    ap.add_argument("--exclude", action="append", default=[], metavar="TEXT",
+                    help="skip project folders whose name contains TEXT (repeatable, case-insensitive)")
     args = ap.parse_args(argv)
 
     if args.hook:
@@ -534,7 +536,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.all or args.latest:
-        paths = [p for p in find_sessions(args.projects, parse_since(args.since)) if has_compaction(p)]
+        skip = [x.lower() for x in args.exclude]
+        paths = [p for p in find_sessions(args.projects, parse_since(args.since))
+                 if not any(x in p.parent.name.lower() for x in skip) and has_compaction(p)]
         if args.latest:
             paths = paths[:1]
     else:
