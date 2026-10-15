@@ -598,27 +598,44 @@ class Board:
         self.blank(bg=self.HOUSING)
         self.blank()
 
+    def note(self, text: str) -> None:
+        """A dim line, wrapped by words so a narrow terminal loses nothing."""
+        line = ""
+        for word in text.split(" "):
+            if line and vwidth(line + " " + word) > self.w - 4:
+                self.row(self.text(line, self.DIM))
+                line = word
+            else:
+                line = f"{line} {word}" if line else word
+        self.row(self.text(line, self.DIM))
+
     def close(self, *notes: str) -> None:
         self.blank()
         for n in notes:
-            self.row(self.text(n, self.DIM))
+            self.note(n)
         self.blank()
         self.blank(bg=self.HOUSING)
 
     def render(self, stream=None, animate: bool = False, frame_s: float = 0.035) -> None:
         stream = stream or sys.stdout
-        for line in self.lines:
-            if isinstance(line, tuple):
-                frame_fn, frames = line
-                if animate:
-                    for k in range(frames):
-                        stream.write("\r" + frame_fn(k))
-                        stream.flush()
-                        time.sleep(frame_s)
-                    stream.write("\r")
-                line = frame_fn(10**6)
-            stream.write(line + "\n")
-        stream.flush()
+        if animate:
+            stream.write("\x1b[?25l")   # no cursor blinking over the flaps
+        try:
+            for line in self.lines:
+                if isinstance(line, tuple):
+                    frame_fn, frames = line
+                    if animate:
+                        for k in range(frames):
+                            stream.write("\r" + frame_fn(k))
+                            stream.flush()
+                            time.sleep(frame_s)
+                        stream.write("\r")
+                    line = frame_fn(10**6)
+                stream.write(line + "\n")
+        finally:
+            if animate:
+                stream.write("\x1b[?25h")
+            stream.flush()
 
 
 def aggregate_board(agg: dict, board: Board | None = None) -> Board:
@@ -648,7 +665,7 @@ def aggregate_board(agg: dict, board: Board | None = None) -> Board:
         b.flap_row(f"{hit} OF {n} COMPACTIONS", [], [], b.WELL)
         what = ("a server, deploy, port or container the agent used" if kind == "env"
                 else "files the agent edited")
-        b.row(b.text(f"the summary never mentions {what}", b.DIM))
+        b.note(f"the summary never mentions {what}")
     triggers = " · ".join(f"{t} {k}" for t, k in agg["triggers"].items())
     pct = agg["median_reduction_pct"]
     plural = lambda k, word: f"{k} {word}" + ("" if k == 1 else "s")  # noqa: E731
