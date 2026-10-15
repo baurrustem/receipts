@@ -1,18 +1,18 @@
 {
   "skill": "compact-receipts",
-  "version": "0.1.0",
-  "date": "2026-10-15T20:30:00+05:00",
+  "version": "0.1.1",
+  "date": "2026-10-15T20:50:00+05:00",
   "verdict": "PASS",
   "static": {
     "validate_skills": "pass",
     "claude_plugin_validate": "pass",
-    "unit_tests": "pass (15)",
+    "unit_tests": "pass (20)",
     "gitleaks": "skipped locally (runs in CI)",
     "shellcheck": "not applicable (no shell scripts)"
   },
   "eval": {
     "track": "deterministic tool + field audit",
-    "unit_tests": 15,
+    "unit_tests": 20,
     "agent_with_without": "not run in v0.1.0; cases defined in evals/compact-receipts/cases.toml",
     "field_audit": {
       "data": "author's own Claude Code sessions, aggregate only",
@@ -24,7 +24,8 @@
       "compactions_with_edited_files_not_mentioned": 69,
       "edited_files_not_mentioned": 565,
       "instruction_candidates_unscored": 920,
-      "caveat": "Text checks. 'Not mentioned in the summary' is not the same as 'mattered'. Precision was not hand-labelled."
+      "caveat": "Text checks. 'Not mentioned in the summary' is not the same as 'mattered'. Precision was not hand-labelled.",
+      "measured_with": "v0.1.0 (0.1.1 changes presentation only; --json, --hook and plain output are byte-identical on the test fixture)"
     }
   },
   "security": {
@@ -34,12 +35,19 @@
       "credential patterns: URL userinfo, password/token/key assignments, bearer, mysql -p, private key headers, slack and google keys",
       "hook output framed as a data block, JSON-quoted items, no rules injected",
       "hook never fails the session on bad input",
-      "docker regex without nested ambiguous quantifier"
+      "docker regex without nested ambiguous quantifier",
+      "0.1.1: control and format characters (ESC, BEL, C0/C1, bidi, zero-width) stripped from every transcript-derived field before printing: labels, compaction timestamp and trigger, session file and project folder names",
+      "0.1.1: non-integer token counts and odd metadata no longer raise during --all",
+      "0.1.1: FORCE_COLOR=0/false no longer forces the board; SKILL.md lists the display variables it reads"
     ],
     "runs_sends_fetches": "skills/compact-receipts/SKILL.md#what-it-runs--sends--fetches"
   },
   "native_overlap_checked": "Claude Code CHANGELOG up to 2.1.300: idle compaction exists, no report of what a compaction dropped",
   "prior_art": [
-    {"repo": "teamchong/compact", "stars": 5, "difference": "runs compaction; does not report what was dropped"}
+    {
+      "repo": "teamchong/compact",
+      "stars": 5,
+      "difference": "runs compaction; does not report what was dropped"
+    }
   ]
 }

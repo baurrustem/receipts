@@ -4,7 +4,7 @@ description: "Shows what a Claude Code context compaction dropped: servers, depl
 license: MIT
 metadata:
   author: "baurrustem"
-  version: "0.1.0"
+  version: "0.1.1"
 ---
 
 # compact-receipts
@@ -26,7 +26,7 @@ Do not use it to make a session smaller, to compact, or to report token spend (t
    - this session or the latest one: `python3 scripts/compact_receipts.py --latest`
    - a specific transcript: `python3 scripts/compact_receipts.py <path/to/session.jsonl>`
    - an audit of everything: `python3 scripts/compact_receipts.py --all --since 30d`
-   Add `--json` when you need the raw lists. Paths are relative to this skill's folder.
+   Add `--json` when you need the raw lists. Paths are relative to this skill's folder. When its output is not a terminal (your Bash tool), the script prints plain text; a person running it in a terminal sees the same receipt drawn as a split-flap board. If you ever see colour codes (FORCE_COLOR is set), rerun with `--color never`.
 3. Verify the `rule` lines yourself. The script only nominates them: it compares words, and summaries are often written in a different language from the user's messages. For each candidate, read the compaction summary (the user message right after the `compact_boundary` record) and decide whether the instruction is still there in meaning. Keep only the ones that are really missing. Never count a rule as dropped without this check.
 4. Show the receipt, newest compaction first:
    - one line: time, trigger, tokens before → after;
@@ -74,4 +74,4 @@ Agent: runs `python3 scripts/compact_receipts.py --all --since 30d` and reports 
 - **Runs:** `python3 scripts/compact_receipts.py` from this skill (Python 3.9+, standard library only). It reads `~/.claude/projects/**/*.jsonl` or the transcript you name.
 - **Sends:** nothing. No data leaves the machine.
 - **Fetches:** nothing. Works offline.
-- **Secrets:** none. Reads no environment variables. Values that look like keys are redacted in the output.
+- **Secrets:** none. From the environment it reads only display settings: NO_COLOR, FORCE_COLOR, TERM, COLORTERM, CI, COLUMNS. Values that look like keys are redacted in the output, and control characters from transcripts are stripped before anything is printed.

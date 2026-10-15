@@ -20,17 +20,12 @@ Each row links to the skill folder, its eval cases, the raw run logs and the gat
 
 **Receipts #01.** Claude Code compacts long sessions, and since 2.1.299 also idle ones. The summary keeps the big picture and quietly leaves out details: the server or VM the agent was on, files it already changed, open todos, things you said at the start. `compact-receipts` prints a receipt of what each compaction left out.
 
-```
-Compaction #3 · 2026-10-15 14:02 · auto · 412,800 → 15,960 tokens (−96.1%)
-Kept 31/40 facts · dropped 9 (6 new)
-  dropped env  vm-b.internal (ssh), widget-staging.up.railway.app, localhost:3300
-  dropped file src/vm/pool.ts ×4, scripts/provision.sh
-  check   rule "never restart vm-a without asking"
-  red at compaction: npm test (summary does NOT mention any failure)
-```
-<sub>Synthetic example.</sub>
+<img src="docs/compact-receipts-receipt.png" alt="compact-receipts in a terminal: a split-flap board listing, for one compaction, the ssh host, localhost port, deploy host, edited file, open todo and failing test the summary does not mention, each with a yellow NOT MENTIONED flap, and two instructions marked CHECK BY MEANING" width="760">
+<sub>Synthetic example session.</sub>
 
 **Measured on the author's own sessions** (73 compactions in 24 sessions, median size reduction 97.8%): in 26 compactions the summary did not mention at least one environment the agent had been working with (55 in total); in 69 it did not mention files the agent had edited (565 in total). These are text checks: "not mentioned" is not the same as "mattered".
+
+<img src="docs/compact-receipts-audit.png" alt="compact-receipts --all on the author's sessions: 55 environments not mentioned in 26 of 73 compactions, 565 edited files in 69 of 73, 920 instructions to check by meaning, median 97.8% smaller" width="760">
 
 ```bash
 npx skills add baurrustem/receipts --skill compact-receipts
@@ -40,6 +35,7 @@ Then ask your agent "what did the last compaction drop?". Without an agent, from
 python3 skills/compact-receipts/scripts/compact_receipts.py --latest            # last compacted session
 python3 skills/compact-receipts/scripts/compact_receipts.py --all --since 30d   # audit
 ```
+In a terminal it prints the board above. Piped, or run by the agent, it prints plain text; `--color never` or `NO_COLOR=1` forces plain text, `--json` gives everything.
 
 Optional: a SessionStart hook with matcher `compact` running `compact_receipts.py --hook` puts the dropped environments, files and todos back into context right after each compaction. Instructions are not injected automatically; the skill asks the agent to check them by meaning first.
 

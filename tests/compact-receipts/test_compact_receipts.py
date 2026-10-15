@@ -1,6 +1,8 @@
 """Tests for skills/compact-receipts/scripts/compact_receipts.py on a synthetic transcript."""
 import io
 import json
+import os
+import re
 import sys
 import tempfile
 import unittest
@@ -188,6 +190,86 @@ class CompactReceiptsTest(unittest.TestCase):
                     self.assertEqual(cr.main(["--hook"]), 0)
             finally:
                 sys.stdin = stdin
+
+    # ---- terminal board
+
+    def board_lines(self, board):
+        out = io.StringIO()
+        board.render(out)
+        return [ANSI.sub("", line) for line in out.getvalue().splitlines()]
+
+    def test_board_only_for_a_terminal(self):
+        env = {k: os.environ.pop(k) for k in ("NO_COLOR", "FORCE_COLOR", "TERM") if k in os.environ}
+        try:
+            self.assertFalse(cr.use_color("auto", io.StringIO()))
+            self.assertTrue(cr.use_color("auto", TTY()))
+            self.assertTrue(cr.use_color("always", io.StringIO()))
+            os.environ["NO_COLOR"] = "1"
+            self.assertFalse(cr.use_color("auto", TTY()))
+        finally:
+            os.environ.pop("NO_COLOR", None)
+            os.environ.update(env)
+        with redirect_stdout(io.StringIO()) as out:
+            cr.main([str(self.path)])
+        self.assertNotIn("\x1b[", out.getvalue())   # piped, e.g. the agent's Bash tool: plain text
+
+    def test_board_rows_are_one_width(self):
+        agg = cr.aggregate([self.result])
+        for board in (cr.aggregate_board(agg, cr.Board(width=80, truecolor=True)),
+                      cr.receipt_board(self.result, cr.Board(width=80, truecolor=False))):
+            lines = self.board_lines(board)
+            self.assertGreater(len(lines), 10)
+            self.assertEqual({cr.vwidth(line) for line in lines}, {82})
+        text = "\n".join(self.board_lines(cr.receipt_board(self.result, cr.Board(width=80))))
+        self.assertIn("NOT MENTIONED", text)
+        self.assertIn("CHECK BY MEANING", text)
+        self.assertIn("vm-b.internal", text)
+
+    def test_board_flaps_into_the_final_word(self):
+        board = cr.Board(width=80, truecolor=True)
+        board.flap_row("26 OF 73", [], [], board.WELL)
+        frame_fn, frames = board.lines[-1]
+        self.assertGreater(frames, 3)
+        final = ANSI.sub("", frame_fn(10**6))
+        self.assertNotEqual(ANSI.sub("", frame_fn(0)), final)
+        self.assertEqual(ANSI.sub("", frame_fn(frames)), final)
+        self.assertIn(" 2   6 ", final)
+
+    def test_transcript_text_cannot_drive_the_terminal(self):
+        evil = "deploy\x1b]0;pwned\x07\x1b[2J.sh"
+        self.c.new_drops.append(cr.Fact("file", evil, evil))
+        plain = cr.receipt_text(self.result)
+        out = io.StringIO()
+        cr.receipt_board(self.result, cr.Board(width=80)).render(out)
+        for text in (plain, out.getvalue()):
+            self.assertNotIn("\x07", text)
+            self.assertNotIn("\x1b]", text)
+            self.assertNotIn("\x1b[2J", text)
+        self.assertIn("deploy]0;pwned[2J.sh", plain)
+
+    def test_crafted_metadata_and_names_cannot_drive_the_terminal(self):
+        evil = dict(boundary("b1", preserved=["a9"]), timestamp="2026\x1b[2J-10-15")
+        evil["compactMetadata"] = dict(evil["compactMetadata"], trigger="auto\x1b]52;c;cHduZWQ=\x07", preTokens="lots")
+        folder = Path(self.tmp.name) / "proj\x1b[31m\u202eevil"
+        folder.mkdir()
+        path = folder / "x\x1b]0;t\x07.jsonl"
+        path.write_text("\n".join(json.dumps(r) for r in SESSION[:-2] + [evil, SESSION[-1]]) + "\n")
+        result = cr.analyze(path)                       # junk token counts do not crash
+        self.assertIsNone(result["compactions"][0].pre_tokens)
+        boards = io.StringIO()
+        cr.receipt_board(result, cr.Board(width=80)).render(boards)
+        cr.aggregate_board(cr.aggregate([result]), cr.Board(width=80)).render(boards)
+        for text in (cr.receipt_text(result), cr.aggregate_text(cr.aggregate([result])), boards.getvalue()):
+            for bad in ("\x1b[2J", "\x1b]", "\x07", "\x1b[31m", "\u202e"):
+                self.assertNotIn(bad, text)
+
+
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+class TTY(io.StringIO):
+    def isatty(self):
+        return True
 
 
 if __name__ == "__main__":

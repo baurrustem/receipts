@@ -19,7 +19,8 @@ Usage:
   compact_receipts.py --all [--since 30d]   every session, plus a summary across them
   compact_receipts.py --hook                SessionStart hook (matcher "compact"): print the
                                             dropped facts as additionalContext JSON
-Options: --json, --reveal (show full IPs/hosts), --projects DIR.
+Options: --json, --reveal (show full IPs/hosts), --projects DIR, --exclude TEXT,
+         --color auto|always|never (a board in a terminal, plain text in pipes).
 
 Read-only. Stdlib only. Nothing leaves the machine.
 """
@@ -28,10 +29,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
 import shlex
+import shutil
 import sys
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -365,8 +369,10 @@ def analyze(path: Path, reveal: bool = False) -> dict:
         history.extend(records[seg_start:i])
         facts, tests, _ = collect_facts(history, results, reveal)
         s_lower, s_words = summary.lower(), words(summary)
-        c = Compaction(len(out) + 1, rec.get("timestamp", ""), meta.get("trigger", "?"),
-                       meta.get("preTokens"), meta.get("postTokens"), summary)
+        # transcript fields are untrusted: printable strings, positive ints, or nothing
+        c = Compaction(len(out) + 1, printable(str(rec.get("timestamp") or ""))[:32],
+                       printable(str(meta.get("trigger") or "?"))[:20],
+                       _tokens(meta.get("preTokens")), _tokens(meta.get("postTokens")), summary)
         for f in facts:
             if f.uuid and f.uuid in preserved:
                 c.kept.append(f)
@@ -397,8 +403,22 @@ def fmt_tokens(c: Compaction) -> str:
     return "tokens: n/a"
 
 
+CTRL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def printable(text: str) -> str:
+    """One line with no control or format characters (ESC, BEL, bidi, zero-width), so transcript
+    text cannot drive the terminal or reorder what it shows."""
+    text = CTRL_RE.sub("", re.sub(r"[\t\r\n]+", " ", text))
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+
+
+def _tokens(value) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
 def receipt_text(result: dict) -> str:
-    lines = [f"session {Path(result['session']).name}"]
+    lines = [f"session {printable(Path(result['session']).name)}"]
     for c in result["compactions"]:
         total = len(c.kept) + len(c.dropped)
         lines.append("")
@@ -407,13 +427,13 @@ def receipt_text(result: dict) -> str:
         for kind in ("env", "file", "rule", "todo"):
             items = [f for f in c.new_drops if f.kind == kind]
             if items:
-                shown = ", ".join(f"{f.label}{f' ×{f.count}' if f.count > 1 else ''}" for f in items[:6])
+                shown = ", ".join(f"{printable(f.label)}{f' ×{f.count}' if f.count > 1 else ''}" for f in items[:6])
                 more = f" … +{len(items) - 6}" if len(items) > 6 else ""
                 verb = "check  " if kind == "rule" else "dropped"
                 lines.append(f"  {verb} {kind:<4} {shown}{more}")
         if c.red:
             note = "summary mentions a failure" if c.summary_mentions_failure else "summary does NOT mention any failure"
-            lines.append(f"  red at compaction: {', '.join(c.red[:3])} ({note})")
+            lines.append(f"  red at compaction: {printable(', '.join(c.red[:3]))} ({note})")
     return "\n".join(lines)
 
 
@@ -454,6 +474,230 @@ def aggregate_text(agg: dict) -> str:
     lines.append(f"  rule {agg['new_drops']['rule']} candidates to verify (not scored: needs a semantic check)")
     lines.append(f"compactions with failing tests the summary never mentions: {agg['compactions_red_not_mentioned']}")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- terminal board --
+# A person at a terminal gets a split-flap departures board. Pipes, the agent's Bash
+# tool, NO_COLOR, TERM=dumb and --color never get the plain text above.
+
+def use_color(mode: str = "auto", stream=None) -> bool:
+    stream = stream or sys.stdout
+    if mode in ("always", "never"):
+        return mode == "always"
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR", "").lower() not in ("", "0", "false", "no"):
+        return True
+    return stream.isatty() and os.environ.get("TERM", "") != "dumb"
+
+
+def vwidth(text: str) -> int:
+    return sum(0 if unicodedata.combining(ch) else 2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
+
+
+def vclip(text: str, n: int) -> str:
+    if vwidth(text) <= n:
+        return text
+    out, w = "", 0
+    for ch in text:
+        if w + vwidth(ch) > n - 1:
+            break
+        out += ch
+        w += vwidth(ch)
+    return out + "…"
+
+
+SPRING = None   # a row part that takes up the remaining width
+
+
+class Board:
+    """Graphite housing, black well, white flaps, one yellow status. Colours from the Receipts board."""
+    INK = ((239, 234, 224), 254)
+    DIM = ((150, 146, 136), 245)
+    LABEL = ((201, 196, 185), 250)
+    HOUSING = ((58, 58, 55), 237)
+    WELL = ((13, 13, 12), 233)
+    TILE = ((44, 44, 42), 236)        # flap on the black well
+    TILE_DARK = ((20, 20, 19), 234)   # flap on the graphite housing
+    SIGNAL = ((242, 193, 46), 220)
+    SIGNAL_INK = ((20, 20, 18), 16)
+    DRUM = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+    def __init__(self, width: int | None = None, truecolor: bool | None = None):
+        cols = shutil.get_terminal_size((90, 24)).columns
+        self.w = width or max(52, min(cols - 4, 92))
+        if truecolor is None:
+            truecolor = os.environ.get("COLORTERM", "").lower() in ("truecolor", "24bit")
+        self.true = truecolor
+        self.lines: list = []   # rendered rows, or (frame_fn, frames) for a row that flaps in
+
+    def sgr(self, fg=None, bg=None, bold=False) -> str:
+        codes = ["0"] + (["1"] if bold else [])
+        for base, col in ((38, fg), (48, bg)):
+            if col:
+                rgb, c256 = col
+                codes.append(f"{base};2;{rgb[0]};{rgb[1]};{rgb[2]}" if self.true else f"{base};5;{c256}")
+        return f"\x1b[{';'.join(codes)}m"
+
+    def compose(self, parts: list, bg) -> str:
+        fixed = sum(vwidth(p[0]) for p in parts if p is not SPRING) + 4
+        spring = max(1, self.w - fixed)
+        out = [self.sgr(bg=bg), "  "]
+        used = 2
+        for p in parts:
+            if p is SPRING:
+                out += [self.sgr(bg=bg), " " * spring]
+                used += spring
+                continue
+            text, fg, pbg, bold = p
+            text = vclip(text, max(1, self.w - 2 - used))
+            out += [self.sgr(fg, pbg or bg, bold), text]
+            used += vwidth(text)
+        out += [self.sgr(bg=bg), " " * max(0, self.w - used), "\x1b[0m"]
+        return "  " + "".join(out)
+
+    def row(self, *parts, bg=None) -> None:
+        self.lines.append(self.compose(list(parts), bg or self.WELL))
+
+    def blank(self, bg=None) -> None:
+        self.row(bg=bg)
+
+    def text(self, s: str, fg=None, bold=False, bg=None) -> tuple:
+        return (s, fg or self.INK, bg, bold)
+
+    def badge(self, word: str, alert: bool) -> tuple:
+        """A word flap: fixed width, so the status column reads as one row of modules."""
+        word = word.center(18)
+        if alert:
+            return (word, self.SIGNAL_INK, self.SIGNAL, True)
+        return (word, self.INK, self.TILE, True)
+
+    def tiles(self, word: str, bg, settle: list | None = None, frame: int = 10**6) -> list:
+        """Each character on its own flap; before its settle frame a flap shows the drum letters leading up to it."""
+        wide = 4 * len(word) + 4 <= self.w
+        tile = self.TILE_DARK if bg == self.HOUSING else self.TILE
+        parts = []
+        for i, ch in enumerate(word.upper()):
+            shown = ch
+            if settle is not None and frame < settle[i] and ch in self.DRUM:
+                shown = self.DRUM[(self.DRUM.index(ch) - (settle[i] - frame)) % len(self.DRUM)]
+            parts.append((f" {shown} " if wide else shown, self.INK, tile, True))
+            parts.append((" ", None, bg, False))
+        return parts[:-1]
+
+    def flap_row(self, word: str, lead: list, tail: list, bg) -> None:
+        rnd = random.Random(word)
+        settle = [3 + int(i * 0.6) + rnd.randint(0, 3) for i in range(len(word))]
+        frames = max(settle) + 1
+        frame_fn = lambda k: self.compose(lead + self.tiles(word, bg, settle, k) + tail, bg)  # noqa: E731
+        self.lines.append((frame_fn, frames))
+
+    def title(self, right: str) -> None:
+        self.blank(bg=self.HOUSING)
+        self.flap_row("COMPACT-RECEIPTS", [], [SPRING, self.text(right, self.LABEL, True)], self.HOUSING)
+        self.blank(bg=self.HOUSING)
+        self.blank()
+
+    def close(self, *notes: str) -> None:
+        self.blank()
+        for n in notes:
+            self.row(self.text(n, self.DIM))
+        self.blank()
+        self.blank(bg=self.HOUSING)
+
+    def render(self, stream=None, animate: bool = False, frame_s: float = 0.035) -> None:
+        stream = stream or sys.stdout
+        for line in self.lines:
+            if isinstance(line, tuple):
+                frame_fn, frames = line
+                if animate:
+                    for k in range(frames):
+                        stream.write("\r" + frame_fn(k))
+                        stream.flush()
+                        time.sleep(frame_s)
+                    stream.write("\r")
+                line = frame_fn(10**6)
+            stream.write(line + "\n")
+        stream.flush()
+
+
+def aggregate_board(agg: dict, board: Board | None = None) -> Board:
+    b = board or Board()
+    n = agg["compactions"]
+    b.title("ALL SESSIONS")
+    c1 = max(22, (b.w - 4) * 9 // 20)
+    c2 = 14
+    lab = lambda s, w: b.text(s.ljust(w), b.LABEL)  # noqa: E731
+    b.row(lab("LEFT OUT OF THE SUMMARY", c1), lab("COMPACTIONS", c2), lab("STATUS", 0))
+    for kind, name in (("env", "ENVIRONMENTS"), ("file", "EDITED FILES"), ("todo", "OPEN TODOS")):
+        count, hit = agg["new_drops"][kind], agg["compactions_with_new_drop"][kind]
+        if kind == "todo" and not count:
+            continue
+        b.row(b.text(f"{count:>4}  {name}".ljust(c1), bold=True), b.text(f"{hit} of {n}".ljust(c2)),
+              b.badge("NOT MENTIONED", True) if count else b.badge("ALL MENTIONED", False))
+    b.row(b.text(f"{agg['new_drops']['rule']:>4}  INSTRUCTIONS".ljust(c1), bold=True), b.text("".ljust(c2)),
+          b.badge("CHECK BY MEANING", False))
+    red = agg["compactions_red_not_mentioned"]
+    if red:
+        b.row(b.text("      FAILING TESTS".ljust(c1), bold=True), b.text(f"{red} of {n}".ljust(c2)),
+              b.badge("NOT MENTIONED", True))
+    kind = "env" if agg["compactions_with_new_drop"]["env"] else "file"
+    hit = agg["compactions_with_new_drop"][kind]
+    if hit:
+        b.blank()
+        b.flap_row(f"{hit} OF {n} COMPACTIONS", [], [], b.WELL)
+        what = ("a server, deploy, port or container the agent used" if kind == "env"
+                else "files the agent edited")
+        b.row(b.text(f"the summary never mentions {what}", b.DIM))
+    triggers = " · ".join(f"{t} {k}" for t, k in agg["triggers"].items())
+    pct = agg["median_reduction_pct"]
+    plural = lambda k, word: f"{k} {word}" + ("" if k == 1 else "s")  # noqa: E731
+    b.close(f"{plural(n, 'compaction')} · {plural(agg['sessions'], 'session')} · {triggers}"
+            + (f" · median {pct}% smaller" if pct is not None else ""),
+            "text match, not hand-checked · read-only · nothing leaves this machine")
+    return b
+
+
+SECTIONS = (("env", "ENVIRONMENT"), ("file", "EDITED FILES"), ("todo", "OPEN TODOS"), ("rule", "INSTRUCTIONS TO CHECK"))
+
+
+def receipt_board(result: dict, board: Board | None = None) -> Board:
+    b = board or Board()
+    path = Path(result["session"])
+    b.title(f"SESSION {printable(path.stem)[:8].upper()}")
+    b.row(b.text(printable(path.parent.name), b.DIM))
+    for c in result["compactions"]:
+        total = len(c.kept) + len(c.dropped)
+        b.blank()
+        tokens = []
+        if c.pre_tokens and c.post_tokens:
+            pct = 100 * (1 - c.post_tokens / c.pre_tokens)
+            tokens = [b.text(f"{c.pre_tokens:,} → {c.post_tokens:,} tokens  ", b.DIM), b.text(f"−{pct:.1f}%", bold=True)]
+        b.row(b.text(f"COMPACTION {c.index}", bold=True),
+              b.text(f"   {c.timestamp[:16].replace('T', ' ')} · {c.trigger}", b.DIM), SPRING, *tokens)
+        b.row(b.text(f"kept {len(c.kept)} of {total} · {len(c.dropped)} not mentioned · "
+                     f"{len(c.new_drops)} new since the last compaction", b.DIM))
+        for kind, name in SECTIONS:
+            items = [f for f in c.new_drops if f.kind == kind]
+            if not items:
+                continue
+            b.blank()
+            b.row(b.text(name, b.LABEL), SPRING, b.text("IN THE SUMMARY", b.LABEL))
+            for f in items[:6]:
+                times = f"  ×{f.count}" if f.count > 1 else ""
+                b.row(b.text(printable(f.label)), b.text(times, b.DIM), SPRING,
+                      b.badge("CHECK BY MEANING", False) if kind == "rule" else b.badge("NOT MENTIONED", True))
+            if len(items) > 6:
+                b.row(b.text(f"+{len(items) - 6} more · --json lists every item", b.DIM))
+        if c.red:
+            b.blank()
+            b.row(b.text("TESTS FAILING AT COMPACTION", b.LABEL), SPRING, b.text("IN THE SUMMARY", b.LABEL))
+            b.row(b.text(printable(", ".join(c.red[:3]))), SPRING,
+                  b.badge("MENTIONED", False) if c.summary_mentions_failure else b.badge("NOT MENTIONED", True))
+        if not c.new_drops and not c.red:
+            b.row(b.text("nothing new left out", b.DIM), SPRING, b.badge("ALL MENTIONED", False))
+    b.close("text match, not hand-checked · read-only · nothing leaves this machine")
+    return b
 
 
 def to_json(result: dict) -> dict:
@@ -518,6 +762,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--projects", type=Path, default=Path.home() / ".claude" / "projects")
     ap.add_argument("--exclude", action="append", default=[], metavar="TEXT",
                     help="skip project folders whose name contains TEXT (repeatable, case-insensitive)")
+    ap.add_argument("--color", choices=("auto", "always", "never"), default="auto",
+                    help="auto: a board when printing to a terminal, plain text otherwise (honours NO_COLOR)")
     args = ap.parse_args(argv)
 
     if args.hook:
@@ -547,12 +793,28 @@ def main(argv: list[str] | None = None) -> int:
         print("no sessions with a compaction found", file=sys.stderr)
         return 1
 
-    results = [analyze(p, reveal=args.reveal) for p in paths]
+    board = not args.json and use_color(args.color)
+    progress = board and len(paths) > 1 and sys.stderr.isatty()
+    results = []
+    for k, p in enumerate(paths, 1):
+        if progress:
+            sys.stderr.write(f"\r  reading sessions {k}/{len(paths)}")
+            sys.stderr.flush()
+        results.append(analyze(p, reveal=args.reveal))
+    if progress:
+        sys.stderr.write("\r\x1b[2K")
     if args.json:
         payload = {"sessions": [to_json(r) for r in results]}
         if args.all:
             payload["summary"] = aggregate(results)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
+    elif board:
+        animate = sys.stdout.isatty() and not os.environ.get("CI")
+        boards = [aggregate_board(aggregate(results))] if args.all else [receipt_board(r) for r in results]
+        for i, b in enumerate(boards):
+            if i:
+                print()
+            b.render(animate=animate and i == 0)
     elif args.all:
         print(aggregate_text(aggregate(results)))
     else:
