@@ -14,7 +14,7 @@ Open-source agent skills for Claude Code, Codex and OpenClaw. Every skill ships 
 | [compact-receipts](skills/compact-receipts/SKILL.md) | Shows what a context compaction dropped: servers, deployments and ports, edited files, open todos, your earlier instructions. | [gate report](releases/compact-receipts/gate-report.json) | runs a local Python script · sends nothing · fetches nothing |
 <!-- skills:end -->
 
-Each row links to the skill folder, its eval cases, the raw run logs and the gate report.
+Each row links to the skill folder and its gate report, which names how the skill was checked.
 
 ### compact-receipts
 
@@ -39,21 +39,21 @@ In a terminal it prints the board above. Piped, or run by the agent, it prints p
 
 Optional: a SessionStart hook with matcher `compact` running `compact_receipts.py --hook` puts the dropped environments, files and todos back into context right after each compaction. Instructions are not injected automatically; the skill asks the agent to check them by meaning first.
 
+**Track:** tool (unit tests and a field audit on the author's sessions). A with/without comparison on agent tasks has not been run yet.
+
 **Limits (v0.1):** Claude Code transcripts only (Codex next). Environment detection covers ssh-family targets, IPs, localhost ports, docker containers, common VM CLIs and deploy hosts (railway, fly, vercel, render and similar); third-party APIs are ignored on purpose. Instruction matching is word-based and only nominates candidates.
 
 **Runs / sends / fetches:** runs a local Python 3.9+ script (stdlib only) that reads `~/.claude/projects`; sends nothing; fetches nothing.
 
 ## Every skill ships with receipts
 
-A skill earns a place here by beating the same agent without it. For every release:
+Every release says how it was checked, with the numbers and the limits side by side. There are three tracks; each skill names its track in its gate report:
 
-- **With vs without.** The same cases run with the skill installed and without it: same model, same prompts, a fresh session per run.
-- **n.** At least 20 runs per arm before a number appears in this README or in a post. Smaller samples are labeled *exploratory*.
-- **Delta with its uncertainty.** The success rate of each arm, the difference, and a 95% confidence interval for it ([`scripts/eval_stats.py`](scripts/eval_stats.py)).
-- **Near-miss checks.** Prompts that look related but should not trigger the skill. The false-trigger rate is reported next to the hit rate.
-- **Raw logs.** Every run is committed under `evals/<skill>/runs/`, the summary under `releases/<skill>/gate-report.json`. You can recompute every number.
+- **Behavioral: with vs without.** For skills that change what an agent does. The same cases run with the skill installed and without it: same model, same prompts, a fresh session per run. At least 20 runs per arm before a number appears here or in a post (smaller samples are labeled *exploratory*), the success rate of each arm with the difference and a 95% confidence interval ([`scripts/eval_stats.py`](scripts/eval_stats.py)), and near-miss prompts that should not trigger the skill, with the false-trigger rate next to the hit rate.
+- **Visual: blinded human rating.** For skills whose output is judged by eye. Raters do not know which arm produced what.
+- **Tool: unit tests and a field audit.** For skills built around a deterministic tool. Unit tests on synthetic data, then the tool run on real data with aggregate numbers only, and what was not measured said out loud.
 
-No measurable gain, no release. Skills with visual output are judged by a blinded human rating instead, and say so.
+Raw logs and summaries live under `evals/<skill>/runs/` and `releases/<skill>/gate-report.json`, so every number can be recomputed. No measurable result on its track, no release.
 
 Full protocol: [evals/README.md](evals/README.md).
 

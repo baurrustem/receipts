@@ -1,6 +1,6 @@
 # Eval protocol
 
-Every skill in this repo has to beat the same agent without it. This page is the protocol behind the "receipts" in each release.
+Every skill in this repo is checked on one of three tracks: behavioral (with vs without), visual (blinded human rating) or tool (unit tests and a field audit); see the main README. This page is the protocol for the behavioral track, the with vs without runs.
 
 ## The two arms
 
