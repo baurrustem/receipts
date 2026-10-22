@@ -6,7 +6,7 @@ import re
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -190,6 +190,60 @@ class CompactReceiptsTest(unittest.TestCase):
                     self.assertEqual(cr.main(["--hook"]), 0)
             finally:
                 sys.stdin = stdin
+
+    # ---- CLI
+
+    def run_main(self, argv):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            try:
+                code = cr.main(argv + ["--color", "never"])
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue(), err.getvalue()
+
+    def test_missing_path_is_one_line_and_the_rest_still_runs(self):
+        missing = str(Path(self.tmp.name) / "nope" / "missing.jsonl")
+        code, out, err = self.run_main([missing, str(self.path)])
+        self.assertEqual(code, 1)
+        self.assertIn("Compaction #1", out)                     # the readable session is still reported
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(err.strip().splitlines(), [f"cannot read {missing}: No such file or directory"])
+
+    def test_folder_instead_of_a_file_is_reported(self):
+        code, out, err = self.run_main([self.tmp.name])
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertTrue(err.startswith(f"cannot read {self.tmp.name}: "), err)
+        self.assertNotIn("Traceback", err)
+
+    def test_since_alone_is_rejected(self):
+        code, out, err = self.run_main(["--since", "3d"])
+        self.assertEqual(code, 2)
+        self.assertIn("--since narrows --all or --latest", err)
+        self.assertEqual(out, "")
+
+    def test_since_with_all_and_latest_finds_sessions(self):
+        projects = Path(self.tmp.name) / "projects"
+        (projects / "-repo").mkdir(parents=True)
+        (projects / "-repo" / "s.jsonl").write_text(self.path.read_text())
+        for flag in ("--all", "--latest"):
+            code, out, err = self.run_main([flag, "--since", "3d", "--json", "--projects", str(projects)])
+            self.assertEqual(code, 0, err)
+            self.assertEqual(len(json.loads(out)["sessions"]), 1)
+
+    def test_json_is_valid_when_nothing_is_found(self):
+        empty = Path(self.tmp.name) / "empty-projects"
+        empty.mkdir()
+        code, out, err = self.run_main(["--latest", "--json", "--projects", str(empty)])
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(out), {"sessions": []})
+        self.assertIn("no sessions with a compaction found", err)
+        code, out, _ = self.run_main(["--all", "--json", "--projects", str(empty)])
+        data = json.loads(out)
+        self.assertEqual((data["sessions"], data["summary"]["compactions"]), ([], 0))
+        code, out, _ = self.run_main([str(empty / "missing.jsonl"), "--json"])
+        self.assertEqual((code, json.loads(out)), (1, {"sessions": []}))
 
     # ---- terminal board
 

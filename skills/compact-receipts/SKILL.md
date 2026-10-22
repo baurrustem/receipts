@@ -4,7 +4,7 @@ description: "Shows what a Claude Code context compaction dropped: servers, depl
 license: MIT
 metadata:
   author: "baurrustem"
-  version: "0.1.1"
+  version: "0.1.2"
 ---
 
 # compact-receipts
@@ -26,7 +26,7 @@ Do not use it to make a session smaller, to compact, or to report token spend (t
    - this session or the latest one: `python3 scripts/compact_receipts.py --latest`
    - a specific transcript: `python3 scripts/compact_receipts.py <path/to/session.jsonl>`
    - an audit of everything: `python3 scripts/compact_receipts.py --all --since 30d`
-   Add `--json` when you need the raw lists. Paths are relative to this skill's folder. When its output is not a terminal (your Bash tool), the script prints plain text; a person running it in a terminal sees the same receipt drawn as a split-flap board. If you ever see colour codes (FORCE_COLOR is set), rerun with `--color never`.
+   `--since` (`30d`, `12h`) only narrows `--all` or `--latest`; on its own the script rejects it. Add `--json` when you need the raw lists; it always prints valid JSON, `{"sessions": []}` when nothing is found. Paths are relative to this skill's folder. When its output is not a terminal (your Bash tool), the script prints plain text; a person running it in a terminal sees the same receipt drawn as a split-flap board. If you ever see colour codes (FORCE_COLOR is set), rerun with `--color never`.
 3. Verify the `rule` lines yourself. The script only nominates them: it compares words, and summaries are often written in a different language from the user's messages. For each candidate, read the compaction summary (the user message right after the `compact_boundary` record) and decide whether the instruction is still there in meaning. Keep only the ones that are really missing. Never count a rule as dropped without this check.
 4. Show the receipt, newest compaction first:
    - one line: time, trigger, tokens before → after;

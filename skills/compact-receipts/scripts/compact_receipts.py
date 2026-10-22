@@ -17,6 +17,7 @@ Usage:
   compact_receipts.py [SESSION.jsonl ...]   receipts for these sessions
   compact_receipts.py --latest              the most recent session that has a compaction
   compact_receipts.py --all [--since 30d]   every session, plus a summary across them
+                                            (--since narrows --all or --latest, never alone)
   compact_receipts.py --hook                SessionStart hook (matcher "compact"): print the
                                             dropped facts as additionalContext JSON
 Options: --json, --reveal (show full IPs/hosts), --projects DIR, --exclude TEXT,
@@ -772,7 +773,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("sessions", nargs="*", type=Path)
     ap.add_argument("--latest", action="store_true")
     ap.add_argument("--all", action="store_true")
-    ap.add_argument("--since")
+    ap.add_argument("--since", metavar="30d|12h",
+                    help="with --all or --latest: only sessions modified in the last N days or hours")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--reveal", action="store_true", help="show full IP addresses")
     ap.add_argument("--hook", action="store_true", help="SessionStart hook mode (reads hook JSON on stdin)")
@@ -798,6 +800,9 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": ctx}}))
         return 0
 
+    if args.since and not (args.all or args.latest):
+        ap.error("--since narrows --all or --latest; add one of them, e.g. --all --since 30d")
+
     if args.all or args.latest:
         skip = [x.lower() for x in args.exclude]
         paths = [p for p in find_sessions(args.projects, parse_since(args.since))
@@ -808,23 +813,31 @@ def main(argv: list[str] | None = None) -> int:
         paths = args.sessions
     if not paths:
         print("no sessions with a compaction found", file=sys.stderr)
-        return 1
 
     board = not args.json and use_color(args.color)
     progress = board and len(paths) > 1 and sys.stderr.isatty()
-    results = []
+    results, unreadable = [], 0
     for k, p in enumerate(paths, 1):
         if progress:
             sys.stderr.write(f"\r  reading sessions {k}/{len(paths)}")
             sys.stderr.flush()
-        results.append(analyze(p, reveal=args.reveal))
+        try:
+            results.append(analyze(p, reveal=args.reveal))
+        except OSError as e:   # missing file, a folder, no permission: report it and go on with the rest
+            unreadable += 1
+            if progress:
+                sys.stderr.write("\r\x1b[2K")
+            print(f"cannot read {printable(str(p))}: {printable(e.strerror or str(e))}", file=sys.stderr)
     if progress:
         sys.stderr.write("\r\x1b[2K")
-    if args.json:
+    status = 1 if unreadable or not results else 0
+    if args.json:   # always valid JSON on stdout, even when nothing was found
         payload = {"sessions": [to_json(r) for r in results]}
         if args.all:
             payload["summary"] = aggregate(results)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
+    elif not results:
+        pass        # the reason is already on stderr
     elif board:
         animate = sys.stdout.isatty() and not os.environ.get("CI")
         boards = [aggregate_board(aggregate(results))] if args.all else [receipt_board(r) for r in results]
@@ -836,7 +849,7 @@ def main(argv: list[str] | None = None) -> int:
         print(aggregate_text(aggregate(results)))
     else:
         print("\n\n".join(receipt_text(r) for r in results))
-    return 0
+    return status
 
 
 if __name__ == "__main__":

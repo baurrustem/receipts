@@ -35,7 +35,7 @@ Then ask your agent "what did the last compaction drop?". Without an agent, from
 python3 skills/compact-receipts/scripts/compact_receipts.py --latest            # last compacted session
 python3 skills/compact-receipts/scripts/compact_receipts.py --all --since 30d   # audit
 ```
-In a terminal it prints the board above. Piped, or run by the agent, it prints plain text; `--color never` or `NO_COLOR=1` forces plain text, `--json` gives everything.
+In a terminal it prints the board above. Piped, or run by the agent, it prints plain text; `--color never` or `NO_COLOR=1` forces plain text, `--json` gives everything. `--since 30d` or `--since 12h` narrows `--all` or `--latest` and is rejected on its own.
 
 Optional: a SessionStart hook with matcher `compact` running `compact_receipts.py --hook` puts the dropped environments, files and todos back into context right after each compaction. Instructions are not injected automatically; the skill asks the agent to check them by meaning first.
 

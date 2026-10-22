@@ -2,6 +2,14 @@
 
 All notable changes to this repo. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The plugin version in `.claude-plugin/plugin.json` follows [Semantic Versioning](https://semver.org/). Each skill release links its gate report in `releases/<skill>/`.
 
+## [0.1.2] - 2026-10-22
+
+### Fixed
+
+- **compact-receipts:** a missing or unreadable session path prints one line, `cannot read <path>: <reason>`, instead of a Python traceback. The other paths in the same call are still reported, and the exit code is 1.
+- **compact-receipts:** `--since` without `--all` or `--latest` used to search nothing and report "no sessions with a compaction found". It is now rejected with a usage error (exit code 2) that says to add `--all` or `--latest`.
+- **compact-receipts:** `--json` always prints valid JSON. When nothing is found it prints `{"sessions": []}` (plus an empty `summary` with `--all`) and still exits 1 with the message on stderr.
+
 ## [0.1.1] - 2026-10-15
 
 ### Added
