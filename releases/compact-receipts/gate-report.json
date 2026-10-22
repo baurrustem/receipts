@@ -1,13 +1,13 @@
 {
   "skill": "compact-receipts",
-  "version": "0.1.1",
-  "date": "2026-10-15T20:50:00+05:00",
+  "version": "0.1.2",
+  "date": "2026-10-22T13:48:00+05:00",
   "verdict": "PASS",
   "static": {
     "validate_skills": "pass",
     "claude_plugin_validate": "pass",
-    "unit_tests": "pass (20)",
-    "gitleaks": "skipped locally (runs in CI)",
+    "unit_tests": "pass (25)",
+    "gitleaks": "skipped locally (not installed; runs in CI)",
     "shellcheck": "not applicable (no shell scripts)"
   },
   "eval": {
@@ -38,9 +38,13 @@
       "docker regex without nested ambiguous quantifier",
       "0.1.1: control and format characters (ESC, BEL, C0/C1, bidi, zero-width) stripped from every transcript-derived field before printing: labels, compaction timestamp and trigger, session file and project folder names",
       "0.1.1: non-integer token counts and odd metadata no longer raise during --all",
-      "0.1.1: FORCE_COLOR=0/false no longer forces the board; SKILL.md lists the display variables it reads"
+      "0.1.1: FORCE_COLOR=0/false no longer forces the board; SKILL.md lists the display variables it reads",
+      "0.1.2: an unreadable session path prints one sanitised stderr line instead of a traceback; --since alone is a usage error; --json prints valid JSON when nothing is found"
     ],
-    "runs_sends_fetches": "skills/compact-receipts/SKILL.md#what-it-runs--sends--fetches"
+    "runs_sends_fetches": "skills/compact-receipts/SKILL.md#what-it-runs--sends--fetches",
+    "open_findings": [
+      "0.1.2 review, planned for 0.1.3: sanitise --json fields and hook output like the text output, make the docker option pattern linear on crafted commands, report malformed records per file instead of stopping --all, and correct the SKILL.md disclosure (HOME and LINES are also read). None of them sends data anywhere."
+    ]
   },
   "native_overlap_checked": "Claude Code CHANGELOG up to 2.1.300: idle compaction exists, no report of what a compaction dropped",
   "prior_art": [
