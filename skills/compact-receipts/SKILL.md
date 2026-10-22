@@ -4,7 +4,7 @@ description: "Shows what a Claude Code context compaction dropped: servers, depl
 license: MIT
 metadata:
   author: "baurrustem"
-  version: "0.1.2"
+  version: "0.1.3"
 ---
 
 # compact-receipts
@@ -22,11 +22,11 @@ Do not use it to make a session smaller, to compact, or to report token spend (t
 ## Procedure
 
 1. Find the session. The current session's transcript is the newest `*.jsonl` under `~/.claude/projects/<project-dir>/`. For a named file use it as given.
-2. Run the script that ships with this skill (read-only, offline):
-   - this session or the latest one: `python3 scripts/compact_receipts.py --latest`
-   - a specific transcript: `python3 scripts/compact_receipts.py <path/to/session.jsonl>`
-   - an audit of everything: `python3 scripts/compact_receipts.py --all --since 30d`
-   `--since` (`30d`, `12h`) only narrows `--all` or `--latest`; on its own the script rejects it. Add `--json` when you need the raw lists; it always prints valid JSON, `{"sessions": []}` when nothing is found. Paths are relative to this skill's folder. When its output is not a terminal (your Bash tool), the script prints plain text; a person running it in a terminal sees the same receipt drawn as a split-flap board. If you ever see colour codes (FORCE_COLOR is set), rerun with `--color never`.
+2. Run the script that ships with this skill (read-only, offline). Always call it by the absolute path of this skill's folder, never as `scripts/...` relative to the current directory: a file with the same name in the user's repo would run instead.
+   - this session, or any one transcript: `python3 <absolute path to this skill>/scripts/compact_receipts.py <transcript from step 1>`
+   - the most recently modified session that has a compaction, across all projects: `python3 <absolute path to this skill>/scripts/compact_receipts.py --latest`. That may be another project's session; the first line of the receipt names the project folder, so check it before you report.
+   - an audit of everything: `python3 <absolute path to this skill>/scripts/compact_receipts.py --all --since 30d`
+   `--since` (`30d`, `12h`) only narrows `--all` or `--latest`; on its own the script rejects it. Add `--json` when you need the raw lists; it always prints valid JSON. When nothing is found that is `{"sessions": []}`, plus a `summary` with zero counts under `--all`. A file it cannot read or parse is named on stderr and the other files are still reported. When its output is not a terminal (your Bash tool), the script prints plain text; a person running it in a terminal sees the same receipt drawn as a split-flap board. If you ever see colour codes (FORCE_COLOR is set), rerun with `--color never`.
 3. Verify the `rule` lines yourself. The script only nominates them: it compares words, and summaries are often written in a different language from the user's messages. For each candidate, read the compaction summary (the user message right after the `compact_boundary` record) and decide whether the instruction is still there in meaning. Keep only the ones that are really missing. Never count a rule as dropped without this check.
 4. Show the receipt, newest compaction first:
    - one line: time, trigger, tokens before → after;
@@ -51,7 +51,7 @@ Do not use it to make a session smaller, to compact, or to report token spend (t
 
 User: we just compacted and now you're asking me which server to use. what did we lose?
 
-Agent: runs `python3 scripts/compact_receipts.py --latest`, checks the rule candidates against the summary, and answers:
+Agent: runs `python3 <absolute path to this skill>/scripts/compact_receipts.py <transcript of this session>`, checks the rule candidates against the summary, and answers:
 
 ```
 Compaction #3 · 2026-10-15 14:02 · auto · 412,800 → 15,960 tokens (−96.1%)
@@ -67,11 +67,11 @@ Red at compaction:     npm test (summary does not mention any failure)
 
 User: how much do my compactions usually lose?
 
-Agent: runs `python3 scripts/compact_receipts.py --all --since 30d` and reports the counts per kind, saying that rule counts are unverified candidates.
+Agent: runs `python3 <absolute path to this skill>/scripts/compact_receipts.py --all --since 30d` and reports the counts per kind, saying that rule counts are unverified candidates.
 
 ## What it runs / sends / fetches
 
-- **Runs:** `python3 scripts/compact_receipts.py` from this skill (Python 3.9+, standard library only). It reads `~/.claude/projects/**/*.jsonl` or the transcript you name.
+- **Runs:** `python3 <absolute path to this skill>/scripts/compact_receipts.py` (Python 3.9+, standard library only). It reads `~/.claude/projects/**/*.jsonl` or the transcript you name.
 - **Sends:** nothing. No data leaves the machine.
 - **Fetches:** nothing. Works offline.
-- **Secrets:** none. From the environment it reads only display settings: NO_COLOR, FORCE_COLOR, TERM, COLORTERM, CI, COLUMNS. Values that look like keys are redacted in the output, and control characters from transcripts are stripped before anything is printed.
+- **Secrets:** none. From the environment it reads only HOME (to find `~/.claude/projects`; USERPROFILE on Windows) and display settings: NO_COLOR, FORCE_COLOR, TERM, COLORTERM, CI, COLUMNS, LINES. Values that look like keys are redacted in the output. Control, format and line-separator characters from transcripts and file names (ESC, BEL, C1, bidi, zero-width, tag characters, variation selectors, U+2028/U+2029) are stripped before values are redacted and before anything is printed, in every output: plain text, the terminal board, `--json` and `--hook`.

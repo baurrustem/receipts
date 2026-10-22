@@ -1,18 +1,18 @@
 {
   "skill": "compact-receipts",
-  "version": "0.1.2",
-  "date": "2026-10-22T13:48:00+05:00",
+  "version": "0.1.3",
+  "date": "2026-10-22T15:00:00+05:00",
   "verdict": "PASS",
   "static": {
     "validate_skills": "pass",
     "claude_plugin_validate": "pass",
-    "unit_tests": "pass (25)",
+    "unit_tests": "pass (44)",
     "gitleaks": "skipped locally (not installed; runs in CI)",
     "shellcheck": "not applicable (no shell scripts)"
   },
   "eval": {
     "track": "deterministic tool + field audit",
-    "unit_tests": 20,
+    "unit_tests": 44,
     "agent_with_without": "not run in v0.1.0; cases defined in evals/compact-receipts/cases.toml",
     "field_audit": {
       "data": "author's own Claude Code sessions, aggregate only",
@@ -26,24 +26,49 @@
       "instruction_candidates_unscored": 920,
       "caveat": "Text checks. 'Not mentioned in the summary' is not the same as 'mattered'. Precision was not hand-labelled.",
       "measured_with": "v0.1.0 (0.1.1 changes presentation only; --json, --hook and plain output are byte-identical on the test fixture)"
+    },
+    "regression_check_0.1.3": {
+      "data": "author's own Claude Code sessions, a frozen copy of the 31 transcripts with a compaction",
+      "sessions": 31,
+      "compactions": 93,
+      "result": "--hook output (per transcript) byte-identical to v0.1.2; --all --json summary identical; the only label difference is one instruction whose emoji lost U+FE0F (variation selectors are now stripped)",
+      "live_since_3d": "--all --since 3d --json: 9 sessions, 23 compactions, exit 0",
+      "python": "unit tests pass on 3.9.6 and 3.13.2",
+      "redaction_equivalence": "redact_assignments() and redact_mysql() matched the 0.1.2 regexes on 300,000 random strings (seed 7) and 4,000 in the unit test"
     }
   },
   "security": {
-    "reviewer": "PASS",
+    "reviewer": "PASS (security-reviewer re-run on 0.1.3 twice: the first pass confirmed the nine 0.1.2 findings fixed and raised five lows, fixed above as 're-review'; the second pass found none)",
     "findings_fixed": [
       "file and todo labels redacted and collapsed to one line",
       "credential patterns: URL userinfo, password/token/key assignments, bearer, mysql -p, private key headers, slack and google keys",
       "hook output framed as a data block, JSON-quoted items, no rules injected",
       "hook never fails the session on bad input",
-      "docker regex without nested ambiguous quantifier",
+      "docker regex: the space-separated option argument was dropped in 0.1.0. This entry used to say 'without nested ambiguous quantifier', which was wrong: the option token --?[\\w-]+ could split '--a' two ways, so the pattern still backtracked exponentially (0.19 s at 20 options, about 4x per 2 more). Found in the 0.1.2 review, fixed in 0.1.3 (see below).",
       "0.1.1: control and format characters (ESC, BEL, C0/C1, bidi, zero-width) stripped from every transcript-derived field before printing: labels, compaction timestamp and trigger, session file and project folder names",
       "0.1.1: non-integer token counts and odd metadata no longer raise during --all",
       "0.1.1: FORCE_COLOR=0/false no longer forces the board; SKILL.md lists the display variables it reads",
-      "0.1.2: an unreadable session path prints one sanitised stderr line instead of a traceback; --since alone is a usage error; --json prints valid JSON when nothing is found"
+      "0.1.2: an unreadable session path prints one sanitised stderr line instead of a traceback; --since alone is a usage error; --json prints valid JSON when nothing is found",
+      "0.1.3: --json output runs session paths, labels and failing test commands through the same printable() as the text receipt (C1 CSI/OSC, ESC, BEL, bidi, zero-width and tag characters no longer reach stdout or come back under jq -r)",
+      "0.1.3: printable() turns U+2028/U+2029 into spaces and drops lone surrogates and invisible Mn/Lo characters (variation selectors U+FE00-FE0F and U+E0100-E01EF, U+034F, Hangul fillers)",
+      "0.1.3: docker option token made unambiguous (--?[A-Za-z0-9][\\w-]*), command splitting and credential-assignment redaction made linear; shlex runs only on segments naming an ssh-family tool, on their first 4 KB; Bash commands and user messages cut to 64 KB and paths, todos and test commands to 4 KB before scanning; timing regression tests (200 docker options well under 1 s)",
+      "0.1.3: odd record shapes are skipped, any other per-file error prints 'cannot parse <path>: <type>' and the run goes on with valid --json; find_sessions skips dangling symlinks",
+      "0.1.3: hook_context() applies printable() to labels injected into model context",
+      "0.1.3: plain receipt names the project folder; SKILL.md says --latest spans all projects and passes the current transcript for this session",
+      "0.1.3: SKILL.md runs the script by its absolute path everywhere",
+      "0.1.3: disclosure lists HOME and LINES; it says the cleaning covers plain, board, --json and --hook output; the --json note mentions the --all summary",
+      "0.1.3: test fixtures build credential-shaped strings at runtime",
+      "0.1.3 re-review: transcript text is cleaned with printable() before redact(), so control or zero-width characters cannot split a credential past the patterns",
+      "0.1.3 re-review: the mysql -p redaction is a linear scan with the same matches as the 0.1.2 regex (it was quadratic on repeated 'mysql')",
+      "0.1.3 re-review: user messages are cut to 64 KB before rule extraction, which also bounds the _rule_labels cache",
+      "0.1.3 re-review: SKILL.md says --latest takes the most recently modified session that has a compaction"
     ],
     "runs_sends_fetches": "skills/compact-receipts/SKILL.md#what-it-runs--sends--fetches",
-    "open_findings": [
-      "0.1.2 review, planned for 0.1.3: sanitise --json fields and hook output like the text output, make the docker option pattern linear on crafted commands, report malformed records per file instead of stopping --all, and correct the SKILL.md disclosure (HOME and LINES are also read). None of them sends data anywhere."
+    "open_findings": [],
+    "notes_for_0.1.4": [
+      "Mongolian variation selectors U+180B-U+180D and U+180F (Mn) are not stripped; they carry at most 4 values each",
+      "RULE_RE runs on the raw sentence, so a zero-width character inside 'never' can keep a rule from being nominated (detection only)",
+      "file fact keys keep the raw path, so two paths that differ only by invisible characters print as two items with the same label"
     ]
   },
   "native_overlap_checked": "Claude Code CHANGELOG up to 2.1.300: idle compaction exists, no report of what a compaction dropped",

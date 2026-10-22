@@ -53,11 +53,14 @@ RULE_RE = re.compile(
     re.IGNORECASE,
 )
 SSH_TOOLS = {"ssh", "scp", "rsync", "sftp", "mosh", "autossh"}
+SSH_WORD_RE = re.compile(r"\b(?:ssh|scp|rsync|sftp|mosh|autossh)\b")
 SSH_OPTS_WITH_ARG = {"-i", "-p", "-P", "-o", "-F", "-J", "-l", "-L", "-R", "-D", "-W", "-b", "-c", "-e", "-S", "-E", "-m"}
-SEGMENT_SPLIT_RE = re.compile(r"\s*(?:&&|\|\||;|\|)\s*")
+SEGMENT_SPLIT_RE = re.compile(r"&&|\|\||[;|]")   # no \s* around it: that was quadratic on long blank runs
 IP_RE = re.compile(r"(?<![\w.@-])((?:\d{1,3}\.){3}\d{1,3})(?![\w.-])")
 PORT_RE = re.compile(r"\b(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{2,5})\b")
-DOCKER_RE = re.compile(r"\bdocker (?:exec|logs|restart|stop|start|attach|inspect|cp)\s+(?:--?[\w-]+(?:=\S+)?\s+)*([A-Za-z0-9][\w.-]+)")
+# an option token starts with one or two dashes and then a letter or digit, so `--a` splits one way only:
+# `--?[\w-]+` could split it two ways and backtracked exponentially when no container name followed
+DOCKER_RE = re.compile(r"\bdocker (?:exec|logs|restart|stop|start|attach|inspect|cp)\s+(?:--?[A-Za-z0-9][\w-]*(?:=\S+)?\s+)*([A-Za-z0-9][\w.-]+)")
 VM_RE = re.compile(
     r"\b(?:gcloud compute (?:ssh|scp|instances \w+)|multipass (?:shell|exec|start|stop|info)|"
     r"vagrant (?:ssh|up|halt)|limactl (?:shell|start|stop)|utmctl (?:start|stop|exec)|"
@@ -73,12 +76,62 @@ DEPLOY_SUFFIXES = (
     ".ngrok-free.app", ".trycloudflare.com", ".compute.amazonaws.com", ".internal", ".local", ".lan",
 )
 TEST_TLDS = (".example", ".test", ".invalid", ".localhost", "example.com", "example.org", "example.net")
-SECRET_PATTERNS = [
+# Cut transcript text before any regex runs, so one crafted record cannot stall --all or the hook.
+MAX_COMMAND = 65536   # Bash commands (scanned for environments: long heredocs still name hosts) and user messages
+MAX_TEXT = 4096       # paths, todos and test commands, which are redacted and printed clipped
+SECRET_WORD_RE = re.compile(r"(?i)pass(?:word)?|passwd|secret|token|api[_-]?key|auth")
+WORD_RUN_RE = re.compile(r"[\w-]+")
+ASSIGNED_VALUE_RE = re.compile(r"(\s*[=:]\s*|\s+)(?!‹)\S+")
+
+
+def redact_assignments(text: str) -> str:
+    """`PGPASSWORD=x`, `API_KEY: x`, `--token x`: hide the value after a word that names a credential.
+    A scan over word runs, because one regex for it (a credential word inside a word run) backtracked
+    quadratically on long runs of short words."""
+    out, pos, start = [], 0, 0
+    while True:
+        m = WORD_RUN_RE.search(text, start)
+        if not m:
+            break
+        start = m.end()
+        v = ASSIGNED_VALUE_RE.match(text, m.end()) if SECRET_WORD_RE.search(m.group()) else None
+        if v:
+            out.append(text[pos:m.end()] + v.group(1) + "‹redacted›")
+            pos = start = v.end()
+    return "".join(out) + text[pos:]
+
+
+MYSQL_RE = re.compile(r"\bmysql\b")
+MYSQL_PASSWORD_RE = re.compile(r"\s-p(?=\S)")
+NON_SPACE_RE = re.compile(r"\S+")
+
+
+def redact_mysql(text: str) -> str:
+    r"""`mysql ... -pSECRET` on one line: hide what follows -p. Same matches as `(\bmysql\b[^\n]*?\s-p)\S+`,
+    which rescanned the rest of the line for every `mysql` and was quadratic on `mysql mysql ...`."""
+    out, pos, start = [], 0, 0
+    while True:
+        m = MYSQL_RE.search(text, start)
+        if not m:
+            break
+        eol = text.find("\n", m.end())
+        eol = len(text) if eol < 0 else eol
+        flag = MYSQL_PASSWORD_RE.search(text, m.end(), eol + 4)   # its \s may be the newline itself
+        if not flag or flag.start() > eol:
+            start = eol + 1   # a later `mysql` on this line would find no -p either
+            continue
+        value = NON_SPACE_RE.match(text, flag.end())
+        out.append(text[pos:flag.end()] + "‹redacted›")
+        pos = start = value.end()
+    return "".join(out) + text[pos:]
+
+
+SECRET_PATTERNS = [   # applied in this order; a plain function stands for a step that is not one regex
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "‹redacted key›"),
     (re.compile(r"://[^/\s:@]+:[^@\s/]+@"), "://‹redacted›@"),
     (re.compile(r"(?i)\b(bearer)\s+\S+"), r"\1 ‹redacted›"),
-    (re.compile(r"(?i)\b([\w-]*(?:pass(?:word)?|passwd|secret|token|api[_-]?key|auth)[\w-]*)(\s*[=:]\s*|\s+)(?!‹)\S+"), r"\1\2‹redacted›"),
-    (re.compile(r"(\bmysql\b[^\n]*?\s-p)\S+"), r"\1‹redacted›"),
+    (None, redact_assignments),
+    (None, redact_mysql),
     (re.compile(r"(sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[bpas]-[\w-]+|AIza[\w-]{35}|[A-Za-z0-9_\-]{32,})"), "‹redacted›"),
 ]
 PUBLIC_IP_RE = re.compile(r"(?<![\w.])((?:\d{1,3}\.){3}\d{1,3})(?![\w.])")
@@ -132,16 +185,23 @@ def read_records(path: Path) -> list[dict]:
     return out
 
 
+def _dict(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _str(value) -> str:
+    return value if isinstance(value, str) else ""
+
+
 def content_blocks(rec: dict) -> list:
-    msg = rec.get("message") or {}
-    c = msg.get("content")
+    c = _dict(rec.get("message")).get("content")
     if isinstance(c, str):
         return [{"type": "text", "text": c}]
     return c if isinstance(c, list) else []
 
 
 def text_of(rec: dict) -> str:
-    return "\n".join(b.get("text", "") for b in content_blocks(rec) if isinstance(b, dict) and b.get("type") == "text")
+    return "\n".join(_str(b.get("text")) for b in content_blocks(rec) if isinstance(b, dict) and b.get("type") == "text")
 
 
 def is_boundary(rec: dict) -> bool:
@@ -168,7 +228,7 @@ def mask_ip(ip: str, reveal: bool) -> str:
 def redact(text: str) -> str:
     """Hide credential-looking values and public IPs in free text (rules, todos, test commands, paths)."""
     for pat, repl in SECRET_PATTERNS:
-        text = pat.sub(repl, text)
+        text = pat.sub(repl, text) if pat else repl(text)
     return PUBLIC_IP_RE.sub(lambda m: mask_ip(m.group(1), False) if valid_ip(m.group(1)) else m.group(1), text)
 
 
@@ -191,12 +251,17 @@ def ssh_targets(cmd: str) -> list[str]:
     """First non-option argument of ssh-family commands (user@ stripped), and host: of scp/rsync specs."""
     hosts = []
     for seg in SEGMENT_SPLIT_RE.split(cmd):
+        if not SSH_WORD_RE.search(seg):
+            continue
+        seg = seg[:MAX_TEXT]   # shlex grows each token with +=, quadratic on one long token
         try:
             toks = shlex.split(seg, posix=True)
         except ValueError:
             toks = seg.split()
-        while toks and ("=" in toks[0] and not toks[0].startswith("-") or toks[0] in ("sudo", "env", "exec", "command")):
-            toks = toks[1:]
+        k = 0
+        while k < len(toks) and ("=" in toks[k] and not toks[k].startswith("-") or toks[k] in ("sudo", "env", "exec", "command")):
+            k += 1
+        toks = toks[k:]
         if not toks or os.path.basename(toks[0]) not in SSH_TOOLS:
             continue
         tool, rest = os.path.basename(toks[0]), toks[1:]
@@ -258,7 +323,7 @@ def _rule_labels(text: str) -> tuple:
     for sentence in re.split(r"(?<=[.!?\n])\s+", text):
         s = sentence.strip()
         if 12 <= len(s) <= 600 and RULE_RE.search(s):
-            out.append(clip(redact(s)))
+            out.append(clip(redact(printable(s))))
     return tuple(out)
 
 
@@ -272,7 +337,7 @@ def tool_result_index(records: list[dict]) -> dict[str, dict]:
                 body = b.get("content")
                 if isinstance(body, list):
                     body = "\n".join(x.get("text", "") for x in body if isinstance(x, dict))
-                idx[b.get("tool_use_id", "")] = {"is_error": bool(b.get("is_error")), "text": str(body or "")[:20000]}
+                idx[_str(b.get("tool_use_id"))] = {"is_error": bool(b.get("is_error")), "text": str(body or "")[:20000]}
     return idx
 
 
@@ -289,33 +354,34 @@ def collect_facts(segment: list[dict], results: dict, reveal: bool) -> tuple[lis
             facts[f.key] = f
 
     for rec in segment:
-        uuid = rec.get("uuid", "")
+        uuid = _str(rec.get("uuid"))
         if rec.get("type") == "user" and not rec.get("isCompactSummary") and not rec.get("isMeta"):
             txt = text_of(rec)
             if txt and not txt.lstrip().startswith(NOISE_PREFIXES):
-                for f in rule_facts(txt, uuid):
+                for f in rule_facts(txt[:MAX_COMMAND], uuid):
                     add(f)
         if rec.get("type") != "assistant":
             continue
         for b in content_blocks(rec):
             if not isinstance(b, dict) or b.get("type") != "tool_use":
                 continue
-            name, inp = b.get("name", ""), b.get("input") or {}
+            name, inp = _str(b.get("name")), _dict(b.get("input"))
             if name in EDIT_TOOLS:
-                path = inp.get("file_path") or inp.get("notebook_path")
+                path = str(inp.get("file_path") or inp.get("notebook_path") or "")[:MAX_TEXT]
                 if path:
-                    add(Fact("file", "file:" + path, clip(redact(str(path)), 200), uuid))
+                    add(Fact("file", "file:" + path, clip(redact(printable(path)), 200), uuid))
             elif name == "Bash":
-                cmd = str(inp.get("command", ""))
+                cmd = str(inp.get("command", ""))[:MAX_COMMAND]
                 for f in env_facts(cmd, uuid, reveal):
                     add(f)
                 if TEST_CMD_RE.search(cmd):
-                    res = results.get(b.get("id", ""), {})
+                    res = results.get(_str(b.get("id")), {})
                     failed = res.get("is_error", False) or bool(FAIL_RE.search(res.get("text", "")))
-                    tests[clip(redact(cmd), 80)] = failed
+                    tests[clip(redact(printable(cmd[:MAX_TEXT])), 80)] = failed
             elif name == "TodoWrite":
-                todos = inp.get("todos") or []
-                open_todos = [clip(redact(str(t.get("content", ""))), 100) for t in todos
+                todos = inp.get("todos")
+                open_todos = [clip(redact(printable(str(t.get("content", ""))[:MAX_TEXT])), 100)
+                              for t in (todos if isinstance(todos, list) else [])
                               if isinstance(t, dict) and t.get("status") != "completed" and t.get("content")]
     for t in open_todos:
         add(Fact("todo", "todo:" + t.lower(), t))
@@ -360,8 +426,9 @@ def analyze(path: Path, reveal: bool = False) -> dict:
         if not is_boundary(rec):
             i += 1
             continue
-        meta = rec.get("compactMetadata") or {}
-        preserved = set((meta.get("preservedMessages") or {}).get("allUuids") or [])
+        meta = _dict(rec.get("compactMetadata"))
+        uuids = _dict(meta.get("preservedMessages")).get("allUuids")
+        preserved = {u for u in uuids if isinstance(u, str)} if isinstance(uuids, list) else set()
         summary = ""
         for j in range(i + 1, min(i + 8, n)):
             if records[j].get("isCompactSummary"):
@@ -405,13 +472,18 @@ def fmt_tokens(c: Compaction) -> str:
 
 
 CTRL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+LINE_BREAK_RE = re.compile(r"[\t\r\n\u2028\u2029]+")   # U+2028/U+2029 (Zl, Zp) are line breaks too
+# invisible letters and marks outside Cf: variation selectors (can carry hidden bytes), the combining
+# grapheme joiner, Hangul fillers
+INVISIBLE_RE = re.compile("[\u034f\u115f\u1160\u3164\uffa0\ufe00-\ufe0f\U000e0100-\U000e01ef]")
 
 
 def printable(text: str) -> str:
-    """One line with no control or format characters (ESC, BEL, bidi, zero-width), so transcript
-    text cannot drive the terminal or reorder what it shows."""
-    text = CTRL_RE.sub("", re.sub(r"[\t\r\n]+", " ", text))
-    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    """One line with no control, format, surrogate or invisible characters (ESC, BEL, C1 such as CSI
+    and OSC, bidi, zero-width, tag characters, variation selectors, lone surrogates), so transcript text cannot drive the terminal,
+    reorder or split what it shows, or crash a strict output encoding."""
+    text = INVISIBLE_RE.sub("", CTRL_RE.sub("", LINE_BREAK_RE.sub(" ", text)))
+    return "".join(ch for ch in text if unicodedata.category(ch) not in ("Cf", "Cs"))
 
 
 def _tokens(value) -> int | None:
@@ -419,7 +491,9 @@ def _tokens(value) -> int | None:
 
 
 def receipt_text(result: dict) -> str:
-    lines = [f"session {printable(Path(result['session']).name)}"]
+    path = Path(result["session"])
+    project = f" · project {printable(path.parent.name)}" if path.parent.name else ""
+    lines = [f"session {printable(path.name)}{project}"]
     for c in result["compactions"]:
         total = len(c.kept) + len(c.dropped)
         lines.append("")
@@ -719,12 +793,14 @@ def receipt_board(result: dict, board: Board | None = None) -> Board:
 
 
 def to_json(result: dict) -> dict:
+    """The same strings the text receipt prints, cleaned the same way: json.dumps escapes ESC and BEL
+    (`jq -r` turns them back) and passes C1, bidi and zero-width characters through as they are."""
     def f2d(f: Fact) -> dict:
-        return {"kind": f.kind, "label": f.label, "count": f.count}
-    return {"session": result["session"], "compactions": [
+        return {"kind": f.kind, "label": printable(f.label), "count": f.count}
+    return {"session": printable(result["session"]), "compactions": [
         {"index": c.index, "timestamp": c.timestamp, "trigger": c.trigger, "pre_tokens": c.pre_tokens,
          "post_tokens": c.post_tokens, "kept": len(c.kept), "dropped": [f2d(f) for f in c.dropped],
-         "new_drops": [f2d(f) for f in c.new_drops], "red": c.red,
+         "new_drops": [f2d(f) for f in c.new_drops], "red": [printable(r) for r in c.red],
          "summary_mentions_failure": c.summary_mentions_failure} for c in result["compactions"]]}
 
 
@@ -742,7 +818,7 @@ def hook_context(result: dict, limit: int = 1500) -> str:
     lines, budget = [], limit - len(head) - len(tail)
     for kind in SCORED:
         for f in [f for f in c.dropped if f.kind == kind][:12]:
-            label = clip(redact(f.label), 160).replace("<", "").replace(">", "")
+            label = printable(clip(redact(f.label), 160)).replace("<", "").replace(">", "")
             line = f"\n{kind}: {json.dumps(label, ensure_ascii=False)}"
             if len(line) > budget:
                 break
@@ -755,8 +831,15 @@ def hook_context(result: dict, limit: int = 1500) -> str:
 
 def find_sessions(projects: Path, since_days: float | None) -> list[Path]:
     cutoff = time.time() - since_days * 86400 if since_days else 0
-    files = [p for p in projects.glob("*/*.jsonl") if p.stat().st_mtime >= cutoff]
-    return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
+    found = []
+    for p in projects.glob("*/*.jsonl"):
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:   # a dangling symlink, or a file removed while we look
+            continue
+        if mtime >= cutoff:
+            found.append((mtime, p))
+    return [p for _, p in sorted(found, key=lambda x: x[0], reverse=True)]
 
 
 def parse_since(s: str | None) -> float | None:
@@ -816,21 +899,24 @@ def main(argv: list[str] | None = None) -> int:
 
     board = not args.json and use_color(args.color)
     progress = board and len(paths) > 1 and sys.stderr.isatty()
-    results, unreadable = [], 0
+    results, failed = [], 0
     for k, p in enumerate(paths, 1):
         if progress:
             sys.stderr.write(f"\r  reading sessions {k}/{len(paths)}")
             sys.stderr.flush()
         try:
             results.append(analyze(p, reveal=args.reveal))
-        except OSError as e:   # missing file, a folder, no permission: report it and go on with the rest
-            unreadable += 1
+        except Exception as e:   # one bad file is reported on stderr, the rest still run
+            failed += 1
             if progress:
                 sys.stderr.write("\r\x1b[2K")
-            print(f"cannot read {printable(str(p))}: {printable(e.strerror or str(e))}", file=sys.stderr)
+            if isinstance(e, OSError):   # missing file, a folder, no permission
+                print(f"cannot read {printable(str(p))}: {printable(e.strerror or str(e))}", file=sys.stderr)
+            else:                        # a record shaped in a way the parser does not expect
+                print(f"cannot parse {printable(str(p))}: {type(e).__name__}", file=sys.stderr)
     if progress:
         sys.stderr.write("\r\x1b[2K")
-    status = 1 if unreadable or not results else 0
+    status = 1 if failed or not results else 0
     if args.json:   # always valid JSON on stdout, even when nothing was found
         payload = {"sessions": [to_json(r) for r in results]}
         if args.all:
